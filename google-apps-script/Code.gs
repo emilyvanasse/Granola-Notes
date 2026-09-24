@@ -1,5 +1,5 @@
 /**
- * Granola notes -> Google Docs sync.  (Version 5)
+ * Granola notes -> Google Docs sync.  (Version 6)
  *
  * Reads the lecture notes archived in the GitHub repo (classes/<class>/YYYY-MM-DD_<slug>.md,
  * written daily by the Claude Granola sync routine) and appends each new lecture to two
@@ -73,7 +73,7 @@ function syncNotes() {
           KINDS.forEach(kind => docs[kind].close());
           let saved = JSON.stringify(report); // emailed when the sync finishes
           if (saved.length > 8000) { // Script Properties values max out around 9 KB; drop links
-            saved = JSON.stringify(report.map(r => ({ cls: r.cls, title: r.title, date: r.date })));
+            saved = JSON.stringify(report.map(r => ({ cls: r.cls, title: r.title, date: r.date, classDesc: r.classDesc })));
           }
           props.setProperty(REPORT_KEY, saved);
           ScriptApp.newTrigger('continueSync').timeBased().after(60 * 1000).create();
@@ -85,7 +85,7 @@ function syncNotes() {
         const missing = KINDS.filter(kind => !docs[kind].has(note.key));
         if (!missing.length) continue;
         missing.forEach(kind => docs[kind].append(note, kind));
-        report.push({ cls: cls, title: note.title, date: note.date,
+        report.push({ cls: cls, title: note.title, date: note.date, classDesc: note.classDesc,
           summaries: docs.Summaries.url(), transcripts: docs.Transcripts.url() });
         added++;
         console.log('Added ' + path + ' to ' + missing.join(' + '));
@@ -152,6 +152,7 @@ function parseNote_(md, path) {
     sourceLabel: url ? 'Granola note' : 'Archive file',
     title: titleMatch ? titleMatch[1].trim() : path,
     date: field('Date'),
+    classDesc: (field('Class').split(' — ')[1] || '').trim(),
     summary: summaryAt === -1 ? '' : md.slice(summaryAt, transcriptAt === -1 ? undefined : transcriptAt)
       .replace(/^## Summary\s*$/m, '').trim(),
     transcript: transcriptAt === -1 ? '' : md.slice(transcriptAt).replace(/^## Transcript\s*$/m, '').trim(),
@@ -274,59 +275,118 @@ ClassDoc_.prototype.close = function () {
 function sendReport_(report, byClass) {
   const classes = [];
   report.forEach(r => { if (classes.indexOf(r.cls) === -1) classes.push(r.cls); });
-  const today = Utilities.formatDate(new Date(), TIME_ZONE, 'EEE, MMM d');
-  const subject = report.length
-    ? 'Granola notes: ' + report.length + ' new lecture' + (report.length === 1 ? '' : 's') +
-      ' added (' + classes.join(', ') + ')'
-    : 'Granola notes: nothing new today (' + today + ')';
+  const n = report.length;
+  const subject = n
+    ? 'Granola notes: ' + n + ' new lecture' + (n === 1 ? '' : 's') + ' added (' + classes.join(', ') + ')'
+    : 'Granola notes: nothing new today (' + Utilities.formatDate(new Date(), TIME_ZONE, 'EEE, MMM d') + ')';
+
+  // Most recent lecture per class, so a quiet stretch is easy to tell apart from a broken sync.
+  const latest = Object.keys(byClass).sort().map(cls => {
+    const m = byClass[cls][byClass[cls].length - 1].match(/\/(\d{4})-(\d{2})-(\d{2})_/);
+    return { cls: cls, when: m
+      ? Utilities.formatDate(new Date(+m[1], +m[2] - 1, +m[3], 12), TIME_ZONE, 'EEE, MMM d') : 'unknown' };
+  });
 
   const text = [];
-  const html = [];
-  if (report.length) {
+  if (n) {
     text.push('New lectures added to your Google Docs today:', '');
-    html.push('<p>New lectures added to your Google Docs today:</p>');
     classes.forEach(cls => {
       const items = report.filter(r => r.cls === cls);
-      text.push(cls);
-      html.push('<p><b>' + esc_(cls) + '</b><br>');
-      items.forEach(r => {
-        const line = r.title + (r.date ? ' — ' + r.date : '');
-        text.push('  • ' + line);
-        html.push('&nbsp;&nbsp;• ' + esc_(line) + '<br>');
-      });
-      const link = items.filter(r => r.summaries).pop() || {};
-      if (link.summaries) {
-        text.push('  Summaries: ' + link.summaries, '  Transcripts: ' + link.transcripts, '');
-        html.push('<a href="' + esc_(link.summaries) + '">Summaries</a> · ' +
-          '<a href="' + esc_(link.transcripts) + '">Transcripts</a></p>');
-      } else {
-        text.push('');
-        html.push('</p>');
-      }
+      text.push(cls + (items[0].classDesc ? ' — ' + items[0].classDesc : ''));
+      items.forEach(r => text.push('  • ' + r.title + (r.date ? ' — ' + r.date : '')));
+      const link = items.filter(r => r.summaries).pop();
+      if (link) text.push('  Summaries: ' + link.summaries, '  Transcripts: ' + link.transcripts);
+      text.push('');
     });
   } else {
     text.push('No new lectures were found today, so your docs are unchanged.', '');
-    html.push('<p>No new lectures were found today, so your docs are unchanged.</p>');
   }
-
-  // Most recent lecture per class, so a quiet stretch is easy to tell apart from a broken sync.
   text.push('Most recent lecture on file:');
-  html.push('<p style="color:#666">Most recent lecture on file:<br>');
-  Object.keys(byClass).sort().forEach(cls => {
-    const m = byClass[cls][byClass[cls].length - 1].match(/\/(\d{4})-(\d{2})-(\d{2})_/);
-    const when = m ? Utilities.formatDate(new Date(+m[1], +m[2] - 1, +m[3], 12), TIME_ZONE, 'MMM d')
-      : 'unknown';
-    text.push('  ' + cls + ': ' + when);
-    html.push('&nbsp;&nbsp;' + esc_(cls) + ': ' + when + '<br>');
-  });
-  html.push('</p>');
+  latest.forEach(l => text.push('  ' + l.cls + ': ' + l.when));
 
   MailApp.sendEmail({
     to: Session.getEffectiveUser().getEmail(),
     subject: subject,
     body: text.join('\n'),
-    htmlBody: html.join('\n'),
+    htmlBody: reportHtml_(report, classes, latest),
+    name: 'Granola Notes',
   });
+}
+
+/** The HTML email. Table layout with inline styles, since that's what email clients render. */
+function reportHtml_(report, classes, latest) {
+  const C = { ink: '#111827', muted: '#6b7280', faint: '#9ca3af', line: '#e5e7eb', soft: '#f9fafb',
+    page: '#f3f4f6', accent: '#4f46e5', accentSoft: '#eef2ff', accentInk: '#4338ca' };
+  const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  const n = report.length;
+  const today = Utilities.formatDate(new Date(), TIME_ZONE, 'EEEE, MMMM d');
+  const headline = n ? n + ' new lecture' + (n === 1 ? '' : 's') + ' added' : 'No new lectures today';
+  const sub = n
+    ? 'Across ' + classes.length + ' class' + (classes.length === 1 ? '' : 'es') + ' · ' + today
+    : 'Your docs are up to date · ' + today;
+  const button = (href, label, primary) => '<a href="' + esc_(href) + '" style="display:inline-block;' +
+    'padding:9px 16px;margin:0 8px 8px 0;border-radius:6px;font-size:13px;font-weight:600;' +
+    'text-decoration:none;' + (primary
+      ? 'background:' + C.accent + ';color:#ffffff;border:1px solid ' + C.accent + ';'
+      : 'background:' + C.accentSoft + ';color:' + C.accentInk + ';border:1px solid #c7d2fe;') +
+    '">' + label + '</a>';
+
+  const cards = classes.map(cls => {
+    const items = report.filter(r => r.cls === cls);
+    const link = items.filter(r => r.summaries).pop();
+    const rows = items.map(r => {
+      const when = (r.date || '').replace(/^(\w{3} \d{1,2}), \d{4} /, '$1 · ');
+      return '<tr><td style="padding:12px 20px;border-top:1px solid ' + C.line + ';">' +
+        '<div style="font-size:14px;font-weight:600;color:' + C.ink + ';">' + esc_(r.title) + '</div>' +
+        (when ? '<div style="font-size:13px;color:' + C.muted + ';margin-top:3px;">' + esc_(when) + '</div>' : '') +
+        '</td></tr>';
+    }).join('');
+    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;' +
+      'border:1px solid ' + C.line + ';border-radius:10px;margin:0 0 16px 0;background:#ffffff;">' +
+      '<tr><td style="padding:14px 20px;background:' + C.soft + ';border-radius:10px 10px 0 0;">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' +
+      '<td style="font-size:15px;font-weight:700;color:' + C.ink + ';">' + esc_(cls) +
+      (items[0].classDesc ? '<span style="font-weight:400;color:' + C.muted + ';"> &nbsp;·&nbsp; ' +
+        esc_(items[0].classDesc) + '</span>' : '') + '</td>' +
+      '<td align="right" style="white-space:nowrap;"><span style="display:inline-block;padding:3px 10px;' +
+      'border-radius:999px;background:' + C.accentSoft + ';color:' + C.accentInk + ';font-size:12px;font-weight:600;">' +
+      items.length + ' new</span></td></tr></table></td></tr>' + rows +
+      (link ? '<tr><td style="padding:14px 20px 8px 20px;border-top:1px solid ' + C.line + ';">' +
+        button(link.summaries, 'Open Summaries', true) + button(link.transcripts, 'Open Transcripts', false) +
+        '</td></tr>' : '') +
+      '</table>';
+  }).join('');
+
+  const empty = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px dashed ' +
+    C.line + ';border-radius:10px;margin:0 0 16px 0;"><tr><td align="center" style="padding:28px 20px;">' +
+    '<div style="font-size:15px;font-weight:600;color:' + C.ink + ';">Nothing new to add</div>' +
+    '<div style="font-size:13px;color:' + C.muted + ';margin-top:4px;">No lectures were recorded since the last update.</div>' +
+    '</td></tr></table>';
+
+  const latestRows = latest.map(l => '<tr><td style="padding:6px 0;font-size:13px;color:' + C.ink + ';">' +
+    esc_(l.cls) + '</td><td align="right" style="padding:6px 0;font-size:13px;color:' + C.muted + ';">' +
+    esc_(l.when) + '</td></tr>').join('');
+
+  return '<div style="margin:0;padding:24px 12px;background:' + C.page + ';font-family:' + font + ';">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;">' +
+    // Header
+    '<tr><td style="background:' + C.ink + ';border-radius:12px 12px 0 0;padding:26px 28px;">' +
+    '<div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:' + C.faint + ';font-weight:600;">' +
+    'Granola Notes &nbsp;·&nbsp; Daily update</div>' +
+    '<div style="font-size:24px;font-weight:700;color:#ffffff;margin-top:8px;">' + esc_(headline) + '</div>' +
+    '<div style="font-size:14px;color:#d1d5db;margin-top:4px;">' + esc_(sub) + '</div></td></tr>' +
+    // Body
+    '<tr><td style="background:#ffffff;padding:24px 28px 8px 28px;">' + (n ? cards : empty) + '</td></tr>' +
+    // Latest lecture per class
+    '<tr><td style="background:#ffffff;padding:4px 28px 24px 28px;">' +
+    '<div style="border-top:1px solid ' + C.line + ';padding-top:16px;font-size:11px;letter-spacing:1.2px;' +
+    'text-transform:uppercase;color:' + C.faint + ';font-weight:600;margin-bottom:6px;">Latest lecture on file</div>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' + latestRows + '</table></td></tr>' +
+    // Footer
+    '<tr><td style="background:' + C.soft + ';border-top:1px solid ' + C.line + ';border-radius:0 0 12px 12px;' +
+    'padding:14px 28px;font-size:12px;color:' + C.faint + ';">Sent automatically after your Granola notes were ' +
+    'copied into Google Docs. Your docs keep every lecture, even if it\'s later removed from Granola.</td></tr>' +
+    '</table></div>';
 }
 
 function esc_(s) {
