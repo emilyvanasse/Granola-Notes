@@ -1,8 +1,9 @@
 name: Build and deploy notes site
 
+# Manual-only: GitHub Pages isn't enabled for this repo, so running on every push just
+# produced a failure email per daily sync. To publish the site, enable Pages
+# (Settings -> Pages -> Source: GitHub Actions) and restore the `push: branches: [main]` trigger.
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
 
 permissions:
