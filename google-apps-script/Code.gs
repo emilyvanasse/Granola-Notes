@@ -1,5 +1,5 @@
 /**
- * Granola notes -> Google Docs sync.
+ * Granola notes -> Google Docs sync.  (Version 2)
  *
  * Reads the lecture notes archived in the GitHub repo (classes/<class>/YYYY-MM-DD_<slug>.md,
  * written daily by the Claude Granola sync routine) and appends each new lecture to two
@@ -196,6 +196,7 @@ ClassDoc_.prototype.append = function (note, kind) {
     else this.doc = DocumentApp.openById(this.parts[this.parts.length - 1].file.getId());
   }
   let body = this.doc.getBody();
+  if (!body.getText().trim()) this.setTitle_(this.doc); // e.g. a doc left empty by an interrupted run
   const length = body.getText().length;
   if (length + content.length > DOC_CHAR_LIMIT && length > 1000) {
     const next = this.parts[this.parts.length - 1].part + 1;
@@ -232,9 +233,15 @@ ClassDoc_.prototype.createPart_ = function (part) {
   const doc = DocumentApp.create(name);
   const file = DriveApp.getFileById(doc.getId());
   file.moveTo(this.folder);
-  doc.getBody().getParagraphs()[0].setText(name).setHeading(DocumentApp.ParagraphHeading.TITLE);
+  this.setTitle_(doc);
   this.parts.push({ part: part, file: file });
   return doc;
+};
+
+ClassDoc_.prototype.setTitle_ = function (doc) {
+  const title = doc.getBody().getParagraphs()[0]; // Paragraph.setText returns nothing, so no chaining
+  title.setText(doc.getName());
+  title.setHeading(DocumentApp.ParagraphHeading.TITLE);
 };
 
 ClassDoc_.prototype.close = function () {
