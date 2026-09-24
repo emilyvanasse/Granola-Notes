@@ -13,6 +13,10 @@ This repository archives class notes captured in Granola: transcripts and AI sum
 
 `scripts/build_site.py` renders `classes/**/*.md` into a small browsable static site (stdlib-only; markdown is rendered client-side via marked.js from a CDN, so the build step has no dependencies). `.github/workflows/pages.yml` runs it and deploys the result to GitHub Pages automatically on every push to `main` — the site never needs to be built or committed by hand, and nothing under `_site/` should be checked in.
 
+## Google Docs mirror
+
+`google-apps-script/Code.gs` runs in the owner's Google account (not in CI) and, daily at 6–7pm Eastern, appends every note on `main` that it hasn't seen yet to two Google Docs per class in Drive's `Granola Notes/<class>/` folder: `<class> – Summaries` and `<class> – Transcripts`. It parses the note template below (`# title`, `- **Date:**`, `- **Granola note:**`, `## Summary`, `## Transcript`) and dedupes on the Granola URL, so keep that template stable. The docs are append-only: fixing a note in the repo after it has been mirrored does not update the doc. The Drive connector can't edit doc contents, so don't try to write to these docs from a Claude session. Setup steps are in `google-apps-script/README.md`.
+
 ## Daily Granola sync
 
 A scheduled Routine wakes this session once a day to pull any new lecture notes out of Granola. When that happens — or whenever asked to "sync Granola notes" / "check for new notes" — do the following:
@@ -20,7 +24,7 @@ A scheduled Routine wakes this session once a day to pull any new lecture notes 
 0. Make sure the checkout is on `main` (`git checkout main`) before doing anything else — that's the branch the daily sync and the published site both track. If `main` doesn't exist yet or doesn't have this repo's content (e.g. the initial setup PR hasn't merged), stop and say so instead of pushing anywhere else.
 1. `git pull` to make sure the branch is current.
 2. Call `mcp__Granola__list_meeting_folders`. Each folder returned is a class. For any folder without a matching `classes/<title>/` directory yet, create one: `mkdir -p`, a `README.md` with the class title and Granola's `description` for that folder, and an empty `.processed_ids.txt`.
-3. For each folder, call `mcp__Granola__list_meetings` with that `folder_id` and `time_range: "last_week"` (a week of overlap is intentional — it means a delayed Granola sync can never cause a note to be silently skipped).
+3. For each folder, call `mcp__Granola__list_meetings` with that `folder_id` and `time_range: "custom"`, `custom_start` = 14 days before today and `custom_end` = tomorrow (ISO dates). Don't use `"last_week"`: it means the previous *calendar* week and misses everything from the current one. The two-week overlap is intentional — it means a delayed Granola sync can never cause a note to be silently skipped.
 4. Read `classes/<title>/.processed_ids.txt` and drop any meeting id that's already listed — it's already been exported.
 5. For each remaining meeting: call `mcp__Granola__get_meetings` (batch up to 10 ids per call) for the date/attendees/summary/url, and `mcp__Granola__get_meeting_transcript` for the full transcript. If the transcript call errors (e.g. "Meeting not found"), retry once; if it still fails, write the note with the summary only and note at the top that the transcript wasn't available.
 6. Write one file per new meeting to `classes/<title>/YYYY-MM-DD_<slug>.md` (date from the meeting's date, slug = lowercase title, non-alphanumeric runs collapsed to single hyphens, trimmed to ~60 chars), using this template:
