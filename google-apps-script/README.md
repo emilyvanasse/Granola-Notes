@@ -43,6 +43,6 @@ clock icon). Running `setup` again is safe: it never duplicates anything.
   is lost or cut off.
 - **New classes.** A new Granola folder shows up as a new `classes/<class>/` folder in
   the repo. The script then creates its Drive subfolder and two docs automatically.
-- **Failures.** Apps Script emails you if a run fails. If the error mentions a GitHub
-  `403` rate limit, create a GitHub token with no scopes, then add it under **Project
-  Settings → Script properties** as `GITHUB_TOKEN`.
+- **Failures.** Apps Script emails you if a run fails. The script finds lectures through
+  `classes/index.txt`, which the daily sync updates. A lecture missing from that list won't
+  reach the docs until it's added.

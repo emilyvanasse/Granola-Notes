@@ -1,5 +1,5 @@
 /**
- * Granola notes -> Google Docs sync.  (Version 2)
+ * Granola notes -> Google Docs sync.  (Version 3)
  *
  * Reads the lecture notes archived in the GitHub repo (classes/<class>/YYYY-MM-DD_<slug>.md,
  * written daily by the Claude Granola sync routine) and appends each new lecture to two
@@ -91,15 +91,19 @@ function syncNotes() {
 // ---------------------------------------------------------------------------------------
 // GitHub
 
-/** Returns { "<class>": ["classes/<class>/2026-09-03_x.md", ...] } sorted oldest first. */
+/**
+ * Returns { "<class>": ["classes/<class>/2026-09-03_x.md", ...] } sorted oldest first.
+ * Reads classes/index.txt (kept up to date by the daily sync) rather than GitHub's API,
+ * whose anonymous rate limit is shared with everyone else on Google's servers.
+ */
 function listRepoNotes_() {
-  const url = 'https://api.github.com/repos/' + REPO + '/git/trees/' + BRANCH + '?recursive=1';
-  const tree = JSON.parse(fetchText_(url, true)).tree;
+  const index = fetchText_(rawUrl_('classes/index.txt') + '?t=' + Date.now()); // skip stale caches
   const byClass = {};
-  tree.forEach(entry => {
-    const m = entry.type === 'blob' && entry.path.match(/^classes\/([^/]+)\/\d{4}-\d{2}-\d{2}_[^/]*\.md$/);
+  index.split(/\r?\n/).forEach(line => {
+    const path = line.trim();
+    const m = path.match(/^classes\/([^/]+)\/\d{4}-\d{2}-\d{2}_[^/]*\.md$/);
     if (!m) return;
-    (byClass[m[1]] = byClass[m[1]] || []).push(entry.path);
+    (byClass[m[1]] = byClass[m[1]] || []).push(path);
   });
   Object.keys(byClass).forEach(cls => byClass[cls].sort());
   return byClass;
@@ -110,13 +114,8 @@ function rawUrl_(path) {
     path.split('/').map(encodeURIComponent).join('/');
 }
 
-function fetchText_(url, isApi) {
-  const headers = {};
-  // Optional: unauthenticated GitHub API calls share a rate limit with everyone else on
-  // Google's servers. If runs fail with a 403, add a GITHUB_TOKEN script property.
-  const token = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
-  if (isApi && token) headers.Authorization = 'Bearer ' + token;
-  const res = UrlFetchApp.fetch(url, { headers: headers, muteHttpExceptions: true });
+function fetchText_(url) {
+  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) {
     throw new Error('GET ' + url + ' failed: ' + res.getResponseCode() + ' ' +
       res.getContentText().slice(0, 300));
