@@ -43,6 +43,8 @@ clock icon). Running `setup` again is safe: it never duplicates anything.
   is lost or cut off.
 - **New classes.** A new Granola folder shows up as a new `classes/<class>/` folder in
   the repo. The script then creates its Drive subfolder and two docs automatically.
+- **Daily email.** After each evening run you get an email listing the lectures added per
+  class (with links to the docs), or "nothing new today" plus the latest lecture per class.
 - **Failures.** Apps Script emails you if a run fails. The script finds lectures through
   `classes/index.txt`, which the daily sync updates. A lecture missing from that list won't
   reach the docs until it's added.

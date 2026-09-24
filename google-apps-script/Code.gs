@@ -1,5 +1,5 @@
 /**
- * Granola notes -> Google Docs sync.  (Version 4)
+ * Granola notes -> Google Docs sync.  (Version 5)
  *
  * Reads the lecture notes archived in the GitHub repo (classes/<class>/YYYY-MM-DD_<slug>.md,
  * written daily by the Claude Granola sync routine) and appends each new lecture to two
@@ -29,6 +29,7 @@ const DOC_CHAR_LIMIT = 900000;
 const MAX_RUNTIME_MS = 3.5 * 60 * 1000;
 
 const KINDS = ['Summaries', 'Transcripts'];
+const REPORT_KEY = 'PENDING_REPORT'; // lectures added by runs that haven't been emailed yet
 const SOURCE_LINE = /^(Granola note|Archive file): (\S+)\s*$/gm;
 
 /** Run once by hand: installs the daily trigger and does the first full sync. */
@@ -58,6 +59,8 @@ function syncNotes() {
     const started = Date.now();
     const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
     const byClass = listRepoNotes_();
+    const props = PropertiesService.getScriptProperties();
+    const report = JSON.parse(props.getProperty(REPORT_KEY) || '[]'); // carried over from a resumed run
     let added = 0;
 
     for (const cls of Object.keys(byClass).sort()) {
@@ -68,6 +71,11 @@ function syncNotes() {
       for (const path of byClass[cls]) {
         if (Date.now() - started > MAX_RUNTIME_MS) {
           KINDS.forEach(kind => docs[kind].close());
+          let saved = JSON.stringify(report); // emailed when the sync finishes
+          if (saved.length > 8000) { // Script Properties values max out around 9 KB; drop links
+            saved = JSON.stringify(report.map(r => ({ cls: r.cls, title: r.title, date: r.date })));
+          }
+          props.setProperty(REPORT_KEY, saved);
           ScriptApp.newTrigger('continueSync').timeBased().after(60 * 1000).create();
           console.log('Out of time after ' + added + ' lecture(s); resuming in a minute.');
           return;
@@ -77,12 +85,16 @@ function syncNotes() {
         const missing = KINDS.filter(kind => !docs[kind].has(note.key));
         if (!missing.length) continue;
         missing.forEach(kind => docs[kind].append(note, kind));
+        report.push({ cls: cls, title: note.title, date: note.date,
+          summaries: docs.Summaries.url(), transcripts: docs.Transcripts.url() });
         added++;
         console.log('Added ' + path + ' to ' + missing.join(' + '));
       }
       KINDS.forEach(kind => docs[kind].close());
     }
     console.log('Done. ' + added + ' new lecture(s) added.');
+    sendReport_(report, byClass);
+    props.deleteProperty(REPORT_KEY);
   } finally {
     lock.releaseLock();
   }
@@ -184,6 +196,11 @@ function ClassDoc_(folder, cls, kind) {
   this.doc = null; // opened lazily, only when something is appended
 }
 
+/** Link to the doc new lectures currently go into (the latest part). */
+ClassDoc_.prototype.url = function () {
+  return this.parts.length ? this.parts[this.parts.length - 1].file.getUrl() : '';
+};
+
 ClassDoc_.prototype.has = function (key) {
   return this.keys.has(key);
 };
@@ -249,6 +266,73 @@ ClassDoc_.prototype.close = function () {
   if (this.doc) this.doc.saveAndClose();
   this.doc = null;
 };
+
+// ---------------------------------------------------------------------------------------
+// Daily email
+
+/** Emails what this sync added, grouped by class, or that nothing was new. */
+function sendReport_(report, byClass) {
+  const classes = [];
+  report.forEach(r => { if (classes.indexOf(r.cls) === -1) classes.push(r.cls); });
+  const today = Utilities.formatDate(new Date(), TIME_ZONE, 'EEE, MMM d');
+  const subject = report.length
+    ? 'Granola notes: ' + report.length + ' new lecture' + (report.length === 1 ? '' : 's') +
+      ' added (' + classes.join(', ') + ')'
+    : 'Granola notes: nothing new today (' + today + ')';
+
+  const text = [];
+  const html = [];
+  if (report.length) {
+    text.push('New lectures added to your Google Docs today:', '');
+    html.push('<p>New lectures added to your Google Docs today:</p>');
+    classes.forEach(cls => {
+      const items = report.filter(r => r.cls === cls);
+      text.push(cls);
+      html.push('<p><b>' + esc_(cls) + '</b><br>');
+      items.forEach(r => {
+        const line = r.title + (r.date ? ' — ' + r.date : '');
+        text.push('  • ' + line);
+        html.push('&nbsp;&nbsp;• ' + esc_(line) + '<br>');
+      });
+      const link = items.filter(r => r.summaries).pop() || {};
+      if (link.summaries) {
+        text.push('  Summaries: ' + link.summaries, '  Transcripts: ' + link.transcripts, '');
+        html.push('<a href="' + esc_(link.summaries) + '">Summaries</a> · ' +
+          '<a href="' + esc_(link.transcripts) + '">Transcripts</a></p>');
+      } else {
+        text.push('');
+        html.push('</p>');
+      }
+    });
+  } else {
+    text.push('No new lectures were found today, so your docs are unchanged.', '');
+    html.push('<p>No new lectures were found today, so your docs are unchanged.</p>');
+  }
+
+  // Most recent lecture per class, so a quiet stretch is easy to tell apart from a broken sync.
+  text.push('Most recent lecture on file:');
+  html.push('<p style="color:#666">Most recent lecture on file:<br>');
+  Object.keys(byClass).sort().forEach(cls => {
+    const m = byClass[cls][byClass[cls].length - 1].match(/\/(\d{4})-(\d{2})-(\d{2})_/);
+    const when = m ? Utilities.formatDate(new Date(+m[1], +m[2] - 1, +m[3], 12), TIME_ZONE, 'MMM d')
+      : 'unknown';
+    text.push('  ' + cls + ': ' + when);
+    html.push('&nbsp;&nbsp;' + esc_(cls) + ': ' + when + '<br>');
+  });
+  html.push('</p>');
+
+  MailApp.sendEmail({
+    to: Session.getEffectiveUser().getEmail(),
+    subject: subject,
+    body: text.join('\n'),
+    htmlBody: html.join('\n'),
+  });
+}
+
+function esc_(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 // ---------------------------------------------------------------------------------------
 // Minimal Markdown -> Docs (headings, bullet/numbered lists, tables, **bold**, [links](url))
