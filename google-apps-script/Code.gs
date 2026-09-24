@@ -1,5 +1,5 @@
 /**
- * Granola notes -> Google Docs sync.  (Version 3)
+ * Granola notes -> Google Docs sync.  (Version 4)
  *
  * Reads the lecture notes archived in the GitHub repo (classes/<class>/YYYY-MM-DD_<slug>.md,
  * written daily by the Claude Granola sync routine) and appends each new lecture to two
@@ -26,7 +26,7 @@ const DAILY_HOUR = 18; // runs between 6 and 7pm Eastern, after the 5pm Granola 
 // this, the next lecture goes into "<class> – Transcripts (Part 2)" and you get an email.
 const DOC_CHAR_LIMIT = 900000;
 // Apps Script kills runs at 6 minutes; stop cleanly before that and resume a minute later.
-const MAX_RUNTIME_MS = 4.5 * 60 * 1000;
+const MAX_RUNTIME_MS = 3.5 * 60 * 1000;
 
 const KINDS = ['Summaries', 'Transcripts'];
 const SOURCE_LINE = /^(Granola note|Archive file): (\S+)\s*$/gm;
@@ -195,7 +195,8 @@ ClassDoc_.prototype.append = function (note, kind) {
     else this.doc = DocumentApp.openById(this.parts[this.parts.length - 1].file.getId());
   }
   let body = this.doc.getBody();
-  if (!body.getText().trim()) this.setTitle_(this.doc); // e.g. a doc left empty by an interrupted run
+  const existing = body.getText().trim();
+  if (!existing || existing === this.doc.getName()) this.setTitle_(this.doc); // left by an interrupted run
   const length = body.getText().length;
   if (length + content.length > DOC_CHAR_LIMIT && length > 1000) {
     const next = this.parts[this.parts.length - 1].part + 1;
@@ -225,6 +226,7 @@ ClassDoc_.prototype.append = function (note, kind) {
     source.editAsText().setLinkUrl(start, start + note.key.length - 1, note.key);
   }
   this.keys.add(note.key);
+  this.close(); // save after every lecture: Docs rejects too many unsaved edits in one session
 };
 
 ClassDoc_.prototype.createPart_ = function (part) {
@@ -265,6 +267,7 @@ function appendMarkdown_(body, md) {
         i++;
       }
       i--;
+      if (!rows.length) continue;
       const width = Math.max.apply(null, rows.map(r => r.length));
       const table = body.appendTable(rows.map(r => r.concat(Array(width - r.length).fill(''))));
       if (table.getNumRows() > 0) table.getRow(0).editAsText().setBold(true);
