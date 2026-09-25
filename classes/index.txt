@@ -2,6 +2,7 @@ classes/AC-222/2026-09-01_managerial-accounting-course-overview-and-mylab-setup.
 classes/AC-222/2026-09-11_ac-222-f-managerial-acctng-control.md
 classes/AC-222/2026-09-15_ac-222-f-managerial-acctng-control.md
 classes/AC-222/2026-09-22_ac-222-f-managerial-acctng-control.md
+classes/AC-222/2026-09-25_ac-222-f-managerial-acctng-control.md
 classes/BUAN-210/2026-08-31_excel-fundamentals-and-mindtap-platform-overview.md
 classes/BUAN-210/2026-09-02_buan-210-k-intro-to-data.md
 classes/BUAN-210/2026-09-14_buan-210-k-intro-to-data.md
