@@ -1,5 +1,5 @@
 /**
- * Granola notes -> Google Docs sync.  (Version 6)
+ * Granola notes -> Google Docs sync.  (Version 7)
  *
  * Reads the lecture notes archived in the GitHub repo (classes/<class>/YYYY-MM-DD_<slug>.md,
  * written daily by the Claude Granola sync routine) and appends each new lecture to two
@@ -93,7 +93,7 @@ function syncNotes() {
       KINDS.forEach(kind => docs[kind].close());
     }
     console.log('Done. ' + added + ' new lecture(s) added.');
-    sendReport_(report, byClass);
+    sendReport_(report, byClass, syncHealth_(fetchStatus_()));
     props.deleteProperty(REPORT_KEY);
   } finally {
     lock.releaseLock();
@@ -271,14 +271,54 @@ ClassDoc_.prototype.close = function () {
 // ---------------------------------------------------------------------------------------
 // Daily email
 
-/** Emails what this sync added, grouped by class, or that nothing was new. */
-function sendReport_(report, byClass) {
+/** The status the daily Claude sync writes after every run (classes/sync_status.json), or null. */
+function fetchStatus_() {
+  try {
+    return JSON.parse(fetchText_(rawUrl_('classes/sync_status.json') + '?t=' + Date.now()));
+  } catch (e) {
+    console.log('Could not read sync_status.json: ' + e);
+    return null;
+  }
+}
+
+/**
+ * Whether today's Granola -> GitHub copy actually ran and worked. Without this, a broken sync
+ * looks exactly like a quiet day ("nothing new").
+ */
+function syncHealth_(status) {
+  const fmt = d => Utilities.formatDate(d, TIME_ZONE, "EEE, MMM d 'at' h:mm a");
+  if (!status) {
+    return { ok: false, message: "Couldn't read the Granola sync's status, so it may not have run today." };
+  }
+  const ran = new Date(status.last_run);
+  if (isNaN(ran.getTime())) {
+    return { ok: false, message: "The Granola sync's status is unreadable, so it may not have run today." };
+  }
+  const recent = Date.now() - ran.getTime() < 20 * 3600 * 1000; // the 5pm sync is 1-3h old by email time
+  const skipped = recent && Array.isArray(status.skipped) ? status.skipped : [];
+  if (!recent) {
+    return { ok: false, skipped: [], message: 'The Granola copy hasn\'t run since ' + fmt(ran) +
+      '. New lectures won\'t reach your docs until it runs again.' };
+  }
+  if (status.ok === false) {
+    return { ok: false, skipped: skipped, message: 'The Granola copy ran (' + fmt(ran) + ') but hit a problem: ' +
+      (status.problem || 'no details given') + '.' };
+  }
+  return { ok: true, skipped: skipped, message: 'Granola checked ' + fmt(ran) +
+    (status.mode === 'free' ? ' · Free plan: summaries only' : '') };
+}
+
+/** Emails what this sync added, grouped by class, or that nothing was new, plus sync health. */
+function sendReport_(report, byClass, health) {
   const classes = [];
   report.forEach(r => { if (classes.indexOf(r.cls) === -1) classes.push(r.cls); });
   const n = report.length;
-  const subject = n
+  const skipped = health.skipped || [];
+  const subject = (health.ok ? '' : '⚠ ') + (n
     ? 'Granola notes: ' + n + ' new lecture' + (n === 1 ? '' : 's') + ' added (' + classes.join(', ') + ')'
-    : 'Granola notes: nothing new today (' + Utilities.formatDate(new Date(), TIME_ZONE, 'EEE, MMM d') + ')';
+    : health.ok
+      ? 'Granola notes: nothing new today (' + Utilities.formatDate(new Date(), TIME_ZONE, 'EEE, MMM d') + ')'
+      : 'Granola notes: the sync needs attention');
 
   // Most recent lecture per class, so a quiet stretch is easy to tell apart from a broken sync.
   const latest = Object.keys(byClass).sort().map(cls => {
@@ -288,6 +328,7 @@ function sendReport_(report, byClass) {
   });
 
   const text = [];
+  text.push((health.ok ? '' : 'ATTENTION: ') + health.message, '');
   if (n) {
     text.push('New lectures added to your Google Docs today:', '');
     classes.forEach(cls => {
@@ -301,6 +342,11 @@ function sendReport_(report, byClass) {
   } else {
     text.push('No new lectures were found today, so your docs are unchanged.', '');
   }
+  if (skipped.length) {
+    text.push('Not added (no class code in the title):');
+    skipped.forEach(k => text.push('  • ' + k.title + (k.date ? ' — ' + k.date : '')));
+    text.push('  If one of these was a class, tell Claude which class it belongs to.', '');
+  }
   text.push('Most recent lecture on file:');
   latest.forEach(l => text.push('  ' + l.cls + ': ' + l.when));
 
@@ -308,22 +354,44 @@ function sendReport_(report, byClass) {
     to: Session.getEffectiveUser().getEmail(),
     subject: subject,
     body: text.join('\n'),
-    htmlBody: reportHtml_(report, classes, latest),
+    htmlBody: reportHtml_(report, classes, latest, health),
     name: 'Granola Notes',
   });
 }
 
 /** The HTML email. Table layout with inline styles, since that's what email clients render. */
-function reportHtml_(report, classes, latest) {
+function reportHtml_(report, classes, latest, health) {
   const C = { ink: '#111827', muted: '#6b7280', faint: '#9ca3af', line: '#e5e7eb', soft: '#f9fafb',
     page: '#f3f4f6', accent: '#4f46e5', accentSoft: '#eef2ff', accentInk: '#4338ca' };
   const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
   const n = report.length;
+  const skipped = health.skipped || [];
   const today = Utilities.formatDate(new Date(), TIME_ZONE, 'EEEE, MMMM d');
-  const headline = n ? n + ' new lecture' + (n === 1 ? '' : 's') + ' added' : 'No new lectures today';
+  const headline = n ? n + ' new lecture' + (n === 1 ? '' : 's') + ' added'
+    : health.ok ? 'No new lectures today' : 'Your notes sync needs attention';
   const sub = n
     ? 'Across ' + classes.length + ' class' + (classes.length === 1 ? '' : 'es') + ' · ' + today
-    : 'Your docs are up to date · ' + today;
+    : (health.ok ? 'Your docs are up to date · ' : '') + today;
+
+  const banner = health.ok
+    ? '<div style="margin:0 0 20px 0;font-size:13px;color:' + C.muted + ';">' +
+      '<span style="color:#059669;font-weight:700;">&#10003;</span>&nbsp; ' + esc_(health.message) + '</div>'
+    : '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px 0;">' +
+      '<tr><td style="background:#fef2f2;border:1px solid #fecaca;border-left:4px solid #dc2626;' +
+      'border-radius:8px;padding:14px 16px;">' +
+      '<div style="font-size:14px;font-weight:700;color:#991b1b;">Sync problem</div>' +
+      '<div style="font-size:13px;color:#7f1d1d;margin-top:4px;line-height:1.45;">' + esc_(health.message) +
+      ' Your existing docs are safe. Ask Claude (in the Granola notes conversation) to take a look.</div>' +
+      '</td></tr></table>';
+
+  const skippedBlock = !skipped.length ? '' :
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px 0;">' +
+    '<tr><td style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 16px;">' +
+    '<div style="font-size:13px;font-weight:700;color:#92400e;">Not added: no class code in the title</div>' +
+    skipped.map(k => '<div style="font-size:13px;color:#78350f;margin-top:6px;">• ' + esc_(k.title) +
+      (k.date ? ' <span style="color:#a16207;">· ' + esc_(k.date) + '</span>' : '') + '</div>').join('') +
+    '<div style="font-size:12px;color:#a16207;margin-top:8px;">If one of these was a class, tell Claude which ' +
+    'class it belongs to.</div></td></tr></table>';
   const button = (href, label, primary) => '<a href="' + esc_(href) + '" style="display:inline-block;' +
     'padding:9px 16px;margin:0 8px 8px 0;border-radius:6px;font-size:13px;font-weight:600;' +
     'text-decoration:none;' + (primary
@@ -376,7 +444,8 @@ function reportHtml_(report, classes, latest) {
     '<div style="font-size:24px;font-weight:700;color:#ffffff;margin-top:8px;">' + esc_(headline) + '</div>' +
     '<div style="font-size:14px;color:#d1d5db;margin-top:4px;">' + esc_(sub) + '</div></td></tr>' +
     // Body
-    '<tr><td style="background:#ffffff;padding:24px 28px 8px 28px;">' + (n ? cards : empty) + '</td></tr>' +
+    '<tr><td style="background:#ffffff;padding:24px 28px 8px 28px;">' + banner + (n ? cards : health.ok ? empty : '') +
+    skippedBlock + '</td></tr>' +
     // Latest lecture per class
     '<tr><td style="background:#ffffff;padding:4px 28px 24px 28px;">' +
     '<div style="border-top:1px solid ' + C.line + ';padding-top:16px;font-size:11px;letter-spacing:1.2px;' +

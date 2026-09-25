@@ -45,6 +45,12 @@ clock icon). Running `setup` again is safe: it never duplicates anything.
   the repo. The script then creates its Drive subfolder and two docs automatically.
 - **Daily email.** After each evening run you get an email listing the lectures added per
   class (with links to the docs), or "nothing new today" plus the latest lecture per class.
+  It also reads `classes/sync_status.json` (written by the 5pm Claude sync) and flags, in
+  red with a ⚠ in the subject, when that sync failed or didn't run, and lists any Granola
+  meetings it skipped because their title had no class code.
+- **Granola free plan.** Granola's free plan provides summaries but not transcripts, so new
+  lectures get their summary in the Summaries doc and a short "not available" line in the
+  Transcripts doc.
 - **Failures.** Apps Script emails you if a run fails. The script finds lectures through
   `classes/index.txt`, which the daily sync updates. A lecture missing from that list won't
   reach the docs until it's added.
