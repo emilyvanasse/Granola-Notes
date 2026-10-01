@@ -13,6 +13,7 @@ classes/EC-203/2026-09-17_ec-203-a-principles-of-macroeconomics.md
 classes/EC-203/2026-09-22_ec-203-a-principles-of-macroeconomics.md
 classes/EC-203/2026-09-24_ec-203-a-principles-of-macroeconomics.md
 classes/EC-203/2026-09-29_ec-203-a-principles-of-macroeconomics.md
+classes/EC-203/2026-10-01_ec-203-a-principles-of-macroeconomics.md
 classes/FN-215/2026-08-31_financial-management-101-course-structure-grading-and.md
 classes/FN-215/2026-09-03_fn-215-a-financial-mgmt.md
 classes/FN-215/2026-09-10_fn-215-a-financial-mgmt.md
@@ -21,3 +22,4 @@ classes/FN-215/2026-09-17_fn-215-a-financial-mgmt.md
 classes/FN-215/2026-09-21_fn-215-a-financial-mgmt.md
 classes/FN-215/2026-09-24_fn-215-a-financial-mgmt.md
 classes/FN-215/2026-09-28_fn-215-a-financial-mgmt.md
+classes/FN-215/2026-10-01_fn-215-a-financial-mgmt.md
