@@ -1,8 +1,8 @@
 {
-  "last_run": "2026-11-04T17:12:32-05:00",
+  "last_run": "2026-11-05T17:14:14-05:00",
   "ok": true,
   "mode": "paid",
-  "added": [],
+  "added": ["classes/EC-203/2026-11-05_ec-203-a-principles-of-macroeconomics.md", "classes/FN-215/2026-11-05_fn-215-a-financial-mgmt.md"],
   "skipped": [],
   "problem": ""
 }
