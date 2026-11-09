@@ -41,3 +41,4 @@ classes/FN-215/2026-10-08_fn-215-a-financial-mgmt.md
 classes/FN-215/2026-10-26_fn-215-a-financial-mgmt.md
 classes/FN-215/2026-11-02_fn-215-a-financial-mgmt.md
 classes/FN-215/2026-11-05_fn-215-a-financial-mgmt.md
+classes/FN-215/2026-11-09_fn-215-a-financial-mgmt.md
